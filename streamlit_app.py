@@ -6,7 +6,7 @@ import plotly.express as px
 import datetime
 
 # ============================================================
-# 기본 설정 & 스타일 (날씨앱 느낌)
+# 기본 설정 & 스타일 (날씨앱 느낌 + 반응형)
 # ============================================================
 st.set_page_config(
     page_title="브리즈번 수질 알리미",
@@ -75,7 +75,7 @@ st.markdown(
     grid-template-columns: 1fr;
     row-gap: 1.2rem;
 
-    min-height: 260px;   /* 고정 height 제거 */
+    min-height: 260px;
     height: auto;
 }
 
@@ -175,16 +175,14 @@ st.markdown(
     font-weight: 700;
 }
 
-/* 모바일에서 배지 아래쪽으로 여유 */
+/* 모바일에서 배지 최소 높이 확보 */
 @media (max-width: 899px) {
   .hero-status-box {
       min-height: 140px;
   }
 }
 
-/* =========================================================
-   오른쪽의 chip 카드들
-   ========================================================= */
+/* chip 카드들 */
 .chip-box {
     padding: 0.75rem 0.9rem;
     border-radius: 1rem;
@@ -219,11 +217,22 @@ st.markdown(
     opacity: 0.75;
 }
 
-/* 아주 작은 화면에서 표, 차트 좌우 여백 줄이기 */
+/* 아주 작은 화면에서 표, 차트 여백 살짝 조정 */
 @media (max-width: 600px) {
   .section-title {
       margin-top: 1rem;
   }
+}
+
+/* ===== Metric 색상 커스터마이즈 (예보 평균/최대 등) ===== */
+div[data-testid="stMetricLabel"] {
+    color: #f9fafb !important;   /* 라벨: 예보 평균, 예보 최대, 위험 구간 등 */
+}
+div[data-testid="stMetricValue"] {
+    color: #f9fafb !important;   /* 값 숫자 */
+}
+div[data-testid="stMetricDelta"] {
+    color: #f97316 !important;   /* 증감(▲/▼) 사용하는 경우 */
 }
 </style>
 """,
@@ -368,22 +377,21 @@ col_hero_main, col_hero_side = st.columns([2, 1.4])
 with col_hero_main:
     chl_text = "–" if pd.isna(cur_chl) else f"{cur_chl:.1f}"
 
-    # ⚠ 문자열 안 줄 들여쓰기를 4칸 이상 넣지 않는다 (맨 앞부터 바로 < 로 시작)
     hero_html = f"""<div class="hero-card">
 <div class="hero-left">
-<div class="hero-title">TODAY • BRISBANE RIVER</div>
-<div class="hero-location">Colmslie 수질 관측 부이</div>
+  <div class="hero-title">TODAY • BRISBANE RIVER</div>
+  <div class="hero-location">Colmslie 수질 관측 부이</div>
 
-<div class="hero-main-row">
-  <span class="hero-main-value">{chl_text}</span>
-  <span class="hero-main-unit">µg/L</span>
-</div>
+  <div class="hero-main-row">
+    <span class="hero-main-value">{chl_text}</span>
+    <span class="hero-main-unit">µg/L</span>
+  </div>
 
-<div class="hero-label">현재 조류(클로로필) 보정값 기준</div>
-<div class="hero-subtext">{level_msg}</div>
-<div class="hero-subtext hero-subtext-note">
-  ※ 환경부·호주 환경기준 참고(0–4 µg/L 양호, 4–8 주의, 8 이상 위험)
-</div>
+  <div class="hero-label">현재 조류(클로로필) 보정값 기준</div>
+  <div class="hero-subtext">{level_msg}</div>
+  <div class="hero-subtext hero-subtext-note">
+    ※ 환경부·호주 환경기준 참고(0–4 µg/L 양호, 4–8 주의, 8 이상 위험)
+  </div>
 </div>
 
 <div class="hero-status-box">
@@ -496,14 +504,29 @@ else:
             "frame": "예측 진행",
         },
     )
+
     add_risk_bands_plotly(fig_fore, y_max)
+
     fig_fore.update_layout(
         legend_title_text="",
         height=360,
         margin=dict(l=10, r=10, t=40, b=10),
         showlegend=False,
+        # 대시보드 배경과 맞추기
+        paper_bgcolor="#020617",
+        plot_bgcolor="#020617",
+        font=dict(color="#e5e7eb"),
+        xaxis=dict(
+            gridcolor="rgba(148,163,184,0.15)",
+            zerolinecolor="rgba(148,163,184,0.2)",
+        ),
+        yaxis=dict(
+            gridcolor="rgba(148,163,184,0.15)",
+            zerolinecolor="rgba(148,163,184,0.2)",
+        ),
     )
 
+    # 재생/멈춤 버튼 위치 & 속도 조절
     if fig_fore.layout.updatemenus and len(fig_fore.layout.updatemenus) > 0:
         um = fig_fore.layout.updatemenus[0]
         um.x = 0
@@ -519,6 +542,7 @@ else:
                 if "transition" in args1:
                     args1["transition"]["duration"] = int(ANIM_SPEED_MS / 2)
 
+    # 프레임 슬라이더 라벨 조정
     frame_labels = {
         i: ts.strftime("%Y-%m-%d %H:%M")
         for i, ts in enumerate(base["Timestamp"])
@@ -534,6 +558,7 @@ else:
 
     st.plotly_chart(fig_fore, use_container_width=True)
 
+    # 예보 요약 메트릭
     c1, c2, c3 = st.columns(3)
     vals = base["Forecast_Chlorophyll_Kalman"]
     with c1:
