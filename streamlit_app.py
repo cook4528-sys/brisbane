@@ -7,6 +7,7 @@ import datetime
 import base64
 import mimetypes
 import plotly.express as px
+import plotly.graph_objects as go
 
 # ============================================================
 # 기본 설정
@@ -509,7 +510,7 @@ div[data-testid="stPlotlyChart"] {
     top: -0.14rem;        /* 위/아래 위치 (조금 더 튀어나오게) */
     width: 4px;           /* 두께 */
     height: 0.70rem;      /* 세로 길이 */
-    background-color: #ef4444;  /* 🔴 빨간색 */
+    background-color: #f97316;  /*  주황색 */
     border-radius: 999px;
 }
 
@@ -755,27 +756,61 @@ else:
         line_df = df_fore.loc[mask].copy()
         line_df = line_df.sort_values("Timestamp")
 
-        # 시간별 예측 라인 그래프
+                # 시간별 예측 라인 그래프 (구간별 색상 변경)
         if not line_df.empty:
             y_max = max(line_df["Forecast_Chlorophyll_Kalman"].max(), 10)
 
-            fig = px.line(
-                line_df,
-                x="Timestamp",
-                y="Forecast_Chlorophyll_Kalman",
-                labels={
-                    "Timestamp": "시간",
-                    "Forecast_Chlorophyll_Kalman": "예상 클로로필 (µg/L)",
-                },
-            )
+            x = line_df["Timestamp"]
+            y = line_df["Forecast_Chlorophyll_Kalman"]
+
+            # 구간별로 값 나누기 (나머지는 NaN → 그 구간만 라인 그림)
+            y_good   = y.where(y < 4)                     # 좋음
+            y_warn   = y.where((y >= 4) & (y < 8))        # 주의
+            y_danger = y.where(y >= 8)                    # 위험
+
+            fig = go.Figure()
             add_risk_bands_plotly(fig, y_max)
 
-            fig.update_traces(line=dict(width=2.0))
+            # 🟢 좋음 구간 (0–4)
+            fig.add_trace(
+                go.Scatter(
+                    x=x,
+                    y=y_good,
+                    mode="lines",
+                    name="좋음 구간",
+                    line=dict(width=2.0, color="#22c55e"),
+                    hovertemplate="%{x}<br>클로로필: %{y:.2f} µg/L<extra></extra>",
+                )
+            )
+
+            # 🟡 주의 구간 (4–8)
+            fig.add_trace(
+                go.Scatter(
+                    x=x,
+                    y=y_warn,
+                    mode="lines",
+                    name="주의 구간",
+                    line=dict(width=2.6, color="#f97316"),  # 조금 더 두껍게
+                    hovertemplate="%{x}<br>클로로필: %{y:.2f} µg/L<extra></extra>",
+                )
+            )
+
+            # 🔴 위험 구간 (8 이상)
+            fig.add_trace(
+                go.Scatter(
+                    x=x,
+                    y=y_danger,
+                    mode="lines",
+                    name="위험 구간",
+                    line=dict(width=2.8, color="#ef4444"),
+                    hovertemplate="%{x}<br>클로로필: %{y:.2f} µg/L<extra></extra>",
+                )
+            )
 
             fig.update_layout(
                 height=260,
                 margin=dict(l=10, r=10, t=35, b=10),
-                showlegend=False,
+                showlegend=False,  # 필요하면 True로 바꿔도 됨
                 paper_bgcolor="rgba(0,0,0,0)",
                 plot_bgcolor="rgba(0,0,0,0)",
                 font=dict(color="#ffffff"),
@@ -783,6 +818,7 @@ else:
                     tickformat="%m-%d %H:%M",
                     gridcolor="rgba(148,163,184,0.25)",
                     zerolinecolor="rgba(148,163,184,0.35)",
+                    title="시간",
                     title_font=dict(color="#ffffff", size=12),
                     tickfont=dict(color="#ffffff", size=11),
                 ),
