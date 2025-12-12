@@ -422,7 +422,7 @@ div[data-testid="stPlotlyChart"] {
     line-height: 1.5;
 }
 
-/* 섹션 타이틀 (📅 이번주 조류량 예측 등) */
+/* 섹션 타이틀 */
 .section-title {
     font-size: 1.3rem;
     font-weight: 600;
@@ -437,21 +437,29 @@ div[data-testid="stPlotlyChart"] {
 /* 주간 예보 카드 */
 .week-card-header {
     display: flex;
-    align-items: center;
+    align-items: flex-start;        /* ✅ 제목/기간 텍스트 상단 정렬 */
     justify-content: space-between;
     margin-bottom: 0.45rem;
     font-size: 0.86rem;
+}
+.week-card-title {
+    font-size: 1.05rem;            /* ✅ 1) 제목 크기 조절 */
+    font-weight: 700;
+    transform: translateY(-2px);   /* ✅ 1) 제목 위치 미세조정(위로) */
 }
 .week-subtitle {
     font-size: 0.76rem;
     opacity: 0.85;
 }
+
 .week-rows {
     margin-top: 0.25rem;
 }
+
+/* ✅ 2) 평균 열 추가로 grid 컬럼 6개로 변경 */
 .week-header-row {
     display: grid;
-    grid-template-columns: 1.5fr 1.6fr 0.9fr 4.0fr 0.9fr;
+    grid-template-columns: 1.5fr 1.6fr 0.9fr 0.9fr 4.0fr 0.9fr;
     column-gap: 0.45rem;
     font-size: 0.76rem;
     opacity: 0.9;
@@ -460,15 +468,17 @@ div[data-testid="stPlotlyChart"] {
     margin-bottom: 0.15rem;
     text-align: center;
 }
+
 .week-row {
     display: grid;
-    grid-template-columns: 1.5fr 1.6fr 0.9fr 4.0fr 0.9fr;
+    grid-template-columns: 1.5fr 1.6fr 0.9fr 0.9fr 4.0fr 0.9fr;
     align-items: center;
     column-gap: 0.45rem;
     padding: 0.25rem 0;
     font-size: 0.82rem;
     text-align: center;
 }
+
 .week-day {
     font-weight: 500;
 }
@@ -485,11 +495,13 @@ div[data-testid="stPlotlyChart"] {
     font-size: 0.78rem;
     opacity: 0.9;
 }
+.week-mean,
 .week-min,
 .week-max {
     font-variant-numeric: tabular-nums;
     opacity: 0.9;
 }
+
 .week-range-track {
     position: relative;
     height: 0.42rem;
@@ -507,10 +519,10 @@ div[data-testid="stPlotlyChart"] {
 /* 평균값 빨간 굵은 바 */
 .week-mean-marker {
     position: absolute;
-    top: -0.14rem;        /* 위/아래 위치 (조금 더 튀어나오게) */
-    width: 4px;           /* 두께 */
-    height: 0.70rem;      /* 세로 길이 */
-    background-color: #f97316;  /*  주황색 */
+    top: -0.14rem;
+    width: 4px;
+    height: 0.70rem;
+    background-color: #ef4444;
     border-radius: 999px;
 }
 
@@ -539,6 +551,50 @@ div[data-testid="stDateInput"] svg {
     font-size: 0.8rem;
     opacity: 0.85;
 }
+
+/* expander 제목/다운로드 버튼 글자색 검정 */
+div[data-testid="stExpander"] summary {
+    color: #000000 !important;
+}
+div[data-testid="stDownloadButton"] button {
+    color: #000000 !important;
+}
+
+/* ✅ expander 위쪽 간격 추가 */
+div[data-testid="stExpander"] {
+    margin-top: 1.2rem;
+}
+
+/* ✅ expander 내용 전체를 카드처럼 */
+div[data-testid="stExpanderDetails"] {
+    background-color: rgba(15, 23, 42, 0.75);
+    border-radius: 1.4rem;
+    padding: 1.0rem 1.0rem 1.1rem 1.0rem;
+    box-shadow: 0 18px 40px rgba(0,0,0,0.45);
+    backdrop-filter: blur(18px);
+    border: 1px solid rgba(148, 163, 184, 0.4);
+}
+
+/* ✅ expander 안 Plotly는 '카드 중복' 제거 */
+div[data-testid="stExpanderDetails"] div[data-testid="stPlotlyChart"] {
+    background-color: transparent !important;
+    box-shadow: none !important;
+    padding: 0 !important;
+}
+
+/* (선택) expander 안 DataFrame 정리 */
+div[data-testid="stExpanderDetails"] div[data-testid="stDataFrame"] {
+    border-radius: 1.0rem;
+    overflow: hidden;
+    border: 1px solid rgba(148, 163, 184, 0.35);
+}
+
+/* ✅ 슬라이더/셀렉트 라벨 흰색 */
+div[data-testid="stSlider"] label,
+div[data-testid="stSelectbox"] label {
+    color: #f9fafb !important;
+}
+
 </style>
 """
 
@@ -568,7 +624,6 @@ st.write("")
 # ============================================================
 col_hero_main, col_hero_side = st.columns([2, 1.4])
 
-# 오른쪽: 날짜 선택 + 지표 + 추천 활동
 with col_hero_side:
     st.markdown('<div class="small-title">현재 주요 지표</div>', unsafe_allow_html=True)
 
@@ -620,10 +675,7 @@ with col_hero_side:
             unsafe_allow_html=True,
         )
     with c4:
-        if sel_time is not None:
-            time_txt = sel_time.strftime("%Y-%m-%d %H:%M")
-        else:
-            time_txt = "정보 없음"
+        time_txt = sel_time.strftime("%Y-%m-%d %H:%M") if sel_time is not None else "정보 없음"
         st.markdown(
             f"""
 <div class="chip-box">
@@ -635,9 +687,7 @@ with col_hero_side:
         )
 
     chl_label_for_rec, _, _, _ = classify_chl(sel_chl)
-    rec_title, rec_color, rec_msg = build_activity_recommendation(
-        sel_chl, sel_temp, sel_turb, chl_label_for_rec
-    )
+    rec_title, rec_color, rec_msg = build_activity_recommendation(sel_chl, sel_temp, sel_turb, chl_label_for_rec)
 
     st.markdown(
         f"""
@@ -655,14 +705,9 @@ with col_hero_side:
         unsafe_allow_html=True,
     )
 
-# 왼쪽: TODAY 카드
 with col_hero_main:
     chl_text = "–" if pd.isna(sel_chl) else f"{sel_chl:.1f}"
-    icon_html = (
-        f'<img class="hero-icon" src="{hero_icon_uri}" />'
-        if hero_icon_uri is not None
-        else ""
-    )
+    icon_html = f'<img class="hero-icon" src="{hero_icon_uri}" />' if hero_icon_uri is not None else ""
 
     hero_html = f"""
 <div class="card hero-card">
@@ -692,10 +737,7 @@ with col_hero_main:
 # ============================================================
 # 2. 이번주 조류량 예측 + 위치 지도
 # ============================================================
-st.markdown(
-    '<div class="section-title">📅 이번주 조류량 예측</div>',
-    unsafe_allow_html=True,
-)
+st.markdown('<div class="section-title">이번주 조류량 예측</div>', unsafe_allow_html=True)
 st.markdown(
     '<div class="info-text">예측 모델을 이용해 앞으로 7일 동안의 일별 조류 농도 범위(최저·최고)와 전체 추세를 함께 보여줍니다.</div>',
     unsafe_allow_html=True,
@@ -731,7 +773,28 @@ else:
         period_end = daily["date"].max()
         period_text = f"{period_start.strftime('%m월 %d일')} ~ {period_end.strftime('%m월 %d일')}"
 
-        # ----- 라인 그래프 조회 바 -----
+        # 최대 예보 문구(날짜/수치 강조)
+        max_info_text = None
+        if forecast_df is not None and not forecast_df.empty:
+            idxmax = forecast_df["Forecast_Chlorophyll_Kalman"].idxmax()
+            max_future_value = forecast_df.loc[idxmax, "Forecast_Chlorophyll_Kalman"]
+            max_future_time = forecast_df.loc[idxmax, "Timestamp"]
+
+            if pd.notna(max_future_value) and pd.notna(max_future_time):
+                lab, emo, _, _ = classify_chl(max_future_value)
+                t_txt = max_future_time.strftime("%Y-%m-%d %H:%M")
+
+                date_color = "#60a5fa"
+                value_color = "#f97316"
+
+                max_info_text = (
+                    "가장 조류 농도가 높게 예보된 시점은 "
+                    f"<span style='color:{date_color}; font-weight:700;'>{t_txt}</span>"
+                    "이며, 예측값은 약 "
+                    f"<span style='color:{value_color}; font-weight:800;'>{max_future_value:.1f} µg/L</span>"
+                    f" ({emo} {lab}) 입니다."
+                )
+
         st.markdown(
             '<div class="info-text" style="margin-top:0.4rem; margin-bottom:0.15rem;">라인 그래프 조회 일자</div>',
             unsafe_allow_html=True,
@@ -747,70 +810,48 @@ else:
         )
 
         if selected_line_date is None:
-            # 전체 기간
             mask = (df_fore["date"] >= period_start) & (df_fore["date"] <= period_end)
         else:
-            # 선택한 하루만
             mask = df_fore["date"] == selected_line_date
 
-        line_df = df_fore.loc[mask].copy()
-        line_df = line_df.sort_values("Timestamp")
+        line_df = df_fore.loc[mask].copy().sort_values("Timestamp")
 
-                # 시간별 예측 라인 그래프 (구간별 색상 변경)
         if not line_df.empty:
             y_max = max(line_df["Forecast_Chlorophyll_Kalman"].max(), 10)
 
             x = line_df["Timestamp"]
             y = line_df["Forecast_Chlorophyll_Kalman"]
 
-            # 구간별로 값 나누기 (나머지는 NaN → 그 구간만 라인 그림)
-            y_good   = y.where(y < 4)                     # 좋음
-            y_warn   = y.where((y >= 4) & (y < 8))        # 주의
-            y_danger = y.where(y >= 8)                    # 위험
+            y_good = y.where(y < 4)
+            y_warn = y.where((y >= 4) & (y < 8))
+            y_danger = y.where(y >= 8)
 
             fig = go.Figure()
             add_risk_bands_plotly(fig, y_max)
 
-            # 🟢 좋음 구간 (0–4)
-            fig.add_trace(
-                go.Scatter(
-                    x=x,
-                    y=y_good,
-                    mode="lines",
-                    name="좋음 구간",
-                    line=dict(width=2.0, color="#22c55e"),
-                    hovertemplate="%{x}<br>클로로필: %{y:.2f} µg/L<extra></extra>",
-                )
-            )
-
-            # 🟡 주의 구간 (4–8)
-            fig.add_trace(
-                go.Scatter(
-                    x=x,
-                    y=y_warn,
-                    mode="lines",
-                    name="주의 구간",
-                    line=dict(width=2.6, color="#f97316"),  # 조금 더 두껍게
-                    hovertemplate="%{x}<br>클로로필: %{y:.2f} µg/L<extra></extra>",
-                )
-            )
-
-            # 🔴 위험 구간 (8 이상)
-            fig.add_trace(
-                go.Scatter(
-                    x=x,
-                    y=y_danger,
-                    mode="lines",
-                    name="위험 구간",
-                    line=dict(width=2.8, color="#ef4444"),
-                    hovertemplate="%{x}<br>클로로필: %{y:.2f} µg/L<extra></extra>",
-                )
-            )
+            fig.add_trace(go.Scatter(
+                x=x, y=y_good, mode="lines",
+                name="좋음 구간",
+                line=dict(width=2.0, color="#22c55e"),
+                hovertemplate="%{x}<br>클로로필: %{y:.2f} µg/L<extra></extra>",
+            ))
+            fig.add_trace(go.Scatter(
+                x=x, y=y_warn, mode="lines",
+                name="주의 구간",
+                line=dict(width=2.6, color="#f97316"),
+                hovertemplate="%{x}<br>클로로필: %{y:.2f} µg/L<extra></extra>",
+            ))
+            fig.add_trace(go.Scatter(
+                x=x, y=y_danger, mode="lines",
+                name="위험 구간",
+                line=dict(width=2.8, color="#ef4444"),
+                hovertemplate="%{x}<br>클로로필: %{y:.2f} µg/L<extra></extra>",
+            ))
 
             fig.update_layout(
                 height=260,
-                margin=dict(l=10, r=10, t=35, b=10),
-                showlegend=False,  # 필요하면 True로 바꿔도 됨
+                margin=dict(l=10, r=10, t=45, b=95),
+                showlegend=False,
                 paper_bgcolor="rgba(0,0,0,0)",
                 plot_bgcolor="rgba(0,0,0,0)",
                 font=dict(color="#ffffff"),
@@ -832,18 +873,27 @@ else:
                 ),
                 title=dict(
                     text="이번주 시간별 조류 농도 추세",
-                    x=0.01,
-                    xanchor="left",
-                    y=0.95,
-                    font=dict(size=14, color="#ffffff"),
+                    x=0.00, xanchor="left",
+                    y=0.95, yanchor="top",
+                    font=dict(size=18, color="#ffffff"),
                 ),
             )
+
+            if max_info_text:
+                fig.add_annotation(
+                    x=-0.02, y=-0.50, xref="paper", yref="paper",
+                    text=max_info_text,
+                    showarrow=False,
+                    xanchor="left", yanchor="bottom",
+                    align="left",
+                    font=dict(size=16, color="#ffffff"),
+                )
 
             st.plotly_chart(fig, use_container_width=True)
         else:
             st.info("선택한 기간에 대한 예측 데이터가 없습니다.")
 
-        # 7일간 일별 예보 카드 HTML
+        # ---------- 7일간 일별 예보 카드 ----------
         week_rows_html = ""
         for _, row in daily.iterrows():
             d = row["date"]
@@ -858,10 +908,9 @@ else:
             d_max = row["max"]
             d_mean = row["mean"]
 
-            # 상태에 따른 색상/아이콘
+            mean_txt = "–" if pd.isna(d_mean) else f"{d_mean:.1f}"
             label, emoji, color, _ = classify_chl(d_mean)
 
-            # 범위 바 위치 계산
             if denom is None or denom <= 0:
                 left_pct = 0
                 width_pct = 100
@@ -871,8 +920,7 @@ else:
                 left_pct = max(0, min(left_pct, 100))
                 width_pct = max(5, min(width_pct, 100 - left_pct))
 
-            # 평균값 마커 위치 계산
-            if denom is None or denom <= 0:
+            if denom is None or denom <= 0 or pd.isna(d_mean):
                 mean_marker_left = 50.0
             else:
                 mean_marker_left = (float(d_mean) - float(global_min)) / float(denom) * 100
@@ -885,13 +933,14 @@ else:
       <span class="week-emoji">{emoji}</span>
       <span class="week-status-text">{label}</span>
     </div>
+    <div class="week-mean">{mean_txt}</div>
     <div class="week-min">{d_min:.1f}</div>
     <div class="week-range-track">
       <div class="week-range-bar"
            style="left:{left_pct:.1f}%; width:{width_pct:.1f}%; background-color:{color};"></div>
       <div class="week-mean-marker"
            style="left:{mean_marker_left:.1f}%;"
-           title="평균 {d_mean:.1f} µg/L"></div>
+           title="평균 {mean_txt} µg/L"></div>
     </div>
     <div class="week-max">{d_max:.1f}</div>
   </div>
@@ -900,13 +949,14 @@ else:
         week_card_html = f"""
 <div class="card">
   <div class="week-card-header">
-    <div>7일간 일별 예보 (µg/L)</div>
+    <div class="week-card-title">7일간 일별 예보 (µg/L)</div>
     <div class="week-subtitle">예보 기간: {period_text}</div>
   </div>
   <div class="week-rows">
     <div class="week-header-row">
       <div>요일</div>
       <div>상태</div>
+      <div>평균</div>
       <div>최소</div>
       <div>예상 범위</div>
       <div>최대</div>
@@ -916,17 +966,16 @@ else:
 </div>
 """
 
-        # 브리즈번 강 위치 지도 카드 (3:2 중 2 부분) + 로드뷰 버튼
         map_card_html = """
 <div class="card">
   <div class="week-card-header">
-    <div>브리즈번 강 위치</div>
+    <div class="week-card-title">브리즈번 강 위치</div>
     <div class="week-subtitle">Colmslie Buoy 기준</div>
   </div>
   <div style="position:relative; border-radius: 1.0rem; overflow: hidden; margin-top: 0.25rem;">
     <iframe
         src="https://www.openstreetmap.org/export/embed.html?bbox=153.08047%2C-27.45170%2C153.08647%2C-27.44520&layer=mapnik&marker=-27.44920%2C153.08347"
-        style="border:0; width:100%; height:220px;"
+        style="border:0; width:100%; height:255px;"
         loading="lazy"
         referrerpolicy="no-referrer-when-downgrade">
     </iframe>
@@ -940,57 +989,102 @@ else:
 </div>
 """
 
-        # 3:2 비율로 카드 배치
         col_week_card, col_map_card = st.columns([3, 2])
         with col_week_card:
             st.markdown(week_card_html, unsafe_allow_html=True)
         with col_map_card:
             st.markdown(map_card_html, unsafe_allow_html=True)
 
-        # 주간 최대 예보 정보
-        max_future_value = None
-        max_future_time = None
-        if forecast_df is not None and not forecast_df.empty:
-            idxmax = forecast_df["Forecast_Chlorophyll_Kalman"].idxmax()
-            max_future_value = forecast_df.loc[idxmax, "Forecast_Chlorophyll_Kalman"]
-            max_future_time = forecast_df.loc[idxmax, "Timestamp"]
-
-        if max_future_time is not None and max_future_value is not None:
-            lab, emo, _, _ = classify_chl(max_future_value)
-            t_txt = max_future_time.strftime("%Y-%m-%d %H:%M")
-            st.markdown(
-                f"""
-<div class="info-text" style="margin-top:0.45rem;">
-  가장 조류 농도가 높게 예보된 시점은 <b>{t_txt}</b>이며, 예측값은 약 <b>{max_future_value:.1f} µg/L</b> ({emo} {lab}) 입니다.
-</div>
-""",
-                unsafe_allow_html=True,
-            )
-
 # ============================================================
-# 3. 전체 데이터 보기
+# 3. 전체 데이터 보기 + 시계열 그래프
 # ============================================================
 with st.expander("📊 전체 수집 데이터 보기", expanded=False):
     st.markdown(
         """
 <div class="expander-text">
-- 아래 표는 센서 보정값(Kalman)이 포함된 원시 데이터 일부입니다.<br>
-- CSV로 내려받아 추가 분석에 활용할 수 있습니다.
+- 아래 표는 센서 보정값(Kalman)이 포함된 원시 데이터입니다.<br>
+- 원하는 기간과 지표를 선택해 시계열로 볼 수 있고, CSV로 내려받아 추가 분석에 활용할 수 있습니다.
 </div>
 """,
         unsafe_allow_html=True,
     )
 
-    if not df.empty and "date" in df.columns and today_date is not None:
-        recent_start = today_date - datetime.timedelta(days=2)
-        recent_mask = df["date"] >= recent_start
-        df_recent = df[recent_mask].copy()
-    else:
-        df_recent = df.tail(500).copy() if not df.empty else df
-
-    st.dataframe(df_recent.tail(300), use_container_width=True)
-
     if not df.empty:
+        if "date" in df.columns and "Timestamp" in df.columns:
+            min_date = df["date"].min()
+            max_date = df["date"].max()
+
+            default_start = max_date - datetime.timedelta(days=2)
+            if default_start < min_date:
+                default_start = min_date
+
+            start_date, end_date = st.slider(
+                "표시 기간 선택",
+                min_value=min_date,
+                max_value=max_date,
+                value=(default_start, max_date),
+                format="YYYY-MM-DD",
+            )
+
+            mask_range = (df["date"] >= start_date) & (df["date"] <= end_date)
+            df_range = df.loc[mask_range].copy()
+        else:
+            df_range = df.copy()
+
+        numeric_cols = [col for col in df_range.columns if pd.api.types.is_numeric_dtype(df_range[col])]
+
+        if numeric_cols:
+            default_idx = numeric_cols.index("Chlorophyll_Kalman") if "Chlorophyll_Kalman" in numeric_cols else 0
+
+            selected_series = st.selectbox(
+                "시계열로 보고 싶은 지표",
+                options=numeric_cols,
+                index=default_idx,
+            )
+
+            df_ts = df_range.dropna(subset=["Timestamp"]).sort_values("Timestamp")
+
+            fig_hist = px.line(
+                df_ts,
+                x="Timestamp",
+                y=selected_series,
+                labels={"Timestamp": "시간", selected_series: selected_series},
+            )
+            fig_hist.update_layout(
+                height=260,
+                margin=dict(l=10, r=10, t=35, b=10),
+                paper_bgcolor="rgba(0,0,0,0)",
+                plot_bgcolor="rgba(0,0,0,0)",
+                font=dict(color="#ffffff"),
+                xaxis=dict(
+                    gridcolor="rgba(148,163,184,0.25)",
+                    zerolinecolor="rgba(148,163,184,0.35)",
+                    title="시간",
+                    title_font=dict(color="#ffffff", size=12),
+                    tickfont=dict(color="#ffffff", size=11),
+                ),
+                yaxis=dict(
+                    gridcolor="rgba(148,163,184,0.25)",
+                    zerolinecolor="rgba(148,163,184,0.35)",
+                    title=selected_series,
+                    title_font=dict(color="#ffffff", size=12),
+                    tickfont=dict(color="#ffffff", size=11),
+                ),
+                title=dict(
+                    text="선택 지표 시계열",
+                    x=0.01,
+                    xanchor="left",
+                    y=0.95,
+                    font=dict(size=14, color="#ffffff"),
+                ),
+            )
+
+            st.plotly_chart(fig_hist, use_container_width=True)
+        else:
+            st.info("시계열로 표시할 수 있는 수치형 지표가 없습니다.")
+
+        st.dataframe(df_range.tail(300), use_container_width=True)
+
         csv_all = df.to_csv(index=False).encode("utf-8-sig")
         st.download_button(
             label="📥 전체 수질 데이터 다운로드 (CSV)",
@@ -998,3 +1092,5 @@ with st.expander("📊 전체 수집 데이터 보기", expanded=False):
             file_name="brisbane_water_all.csv",
             mime="text/csv",
         )
+    else:
+        st.write("데이터가 없습니다.")
