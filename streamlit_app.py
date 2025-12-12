@@ -3,10 +3,10 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 from pathlib import Path
-import plotly.express as px
 import datetime
 import base64
 import mimetypes
+import plotly.express as px
 
 # ============================================================
 # 기본 설정
@@ -71,15 +71,54 @@ def get_last_valid(df_local: pd.DataFrame, col: str):
     return df_local[col].dropna().iloc[-1] if df_local[col].notna().any() else np.nan
 
 
-def add_risk_bands_plotly(fig, y_max):
-    fig.add_hrect(y0=0, y1=4,  line_width=0, fillcolor="#d0f0c0", opacity=0.25)
-    fig.add_hrect(y0=4, y1=8,  line_width=0, fillcolor="#fff3b0", opacity=0.35)
-    fig.add_hrect(y0=8, y1=y_max, line_width=0, fillcolor="#ffc9c9", opacity=0.25)
-    fig.add_hline(y=4, line_dash="dash", line_color="orange", line_width=1)
-    fig.add_hline(y=8, line_dash="dash", line_color="red",    line_width=1)
+def add_risk_bands_plotly(fig, y_max: float):
+    """Plotly 그래프에 위험 구간 밴드(0–4, 4–8, 8+) 추가."""
+    fig.add_hrect(y0=0, y1=4, line_width=0, fillcolor="#22c55e", opacity=0.12)
+    fig.add_hrect(y0=4, y1=8, line_width=0, fillcolor="#eab308", opacity=0.18)
+    fig.add_hrect(y0=8, y1=y_max, line_width=0, fillcolor="#ef4444", opacity=0.12)
+    fig.add_hline(y=4, line_dash="dot", line_color="#eab308", line_width=1)
+    fig.add_hline(y=8, line_dash="dot", line_color="#ef4444", line_width=1)
+
+
+def build_activity_recommendation(chl, temp, turb, label):
+    """조류/수온/탁도 + 등급으로 오늘의 활동 추천 멘트 생성."""
+    if any(pd.isna(x) for x in [chl, temp, turb]):
+        return (
+            "데이터 부족",
+            "#9ca3af",
+            "센서 데이터가 충분하지 않아 오늘의 활동을 정확히 추천하기 어렵습니다. "
+            "현장 안내판·공식 공지를 함께 확인해 주세요.",
+        )
+
+    if label == "좋음" and 18 <= temp <= 26 and turb < 50:
+        color = "#22c55e"
+        title = "레저 활동하기 좋은 날"
+        msg = (
+            f"조류 농도 {chl:.1f} µg/L, 수온 {temp:.1f} °C, 탁도 {turb:.1f} NTU 수준으로 "
+            "카약·패들보드 등 가벼운 수상 레저와 물가 산책을 즐기기 좋습니다. "
+            "어린이 물놀이는 항상 보호자와 함께해 주세요."
+        )
+    elif label == "위험" or turb >= 80:
+        color = "#ef4444"
+        title = "물놀이 자제 권고"
+        msg = (
+            f"조류 농도 {chl:.1f} µg/L로 높은 편이며, 탁도 {turb:.1f} NTU 수준입니다. "
+            "수영·튜브 등 직접 물에 들어가는 활동은 가급적 피하는 것이 좋습니다. "
+            "강 주변 산책이나 조망 위주의 활동을 추천드립니다."
+        )
+    else:
+        color = "#eab308"
+        title = "가벼운 활동 권장 (주의)"
+        msg = (
+            f"조류 농도 {chl:.1f} µg/L, 수온 {temp:.1f} °C 수준으로 일부 시간대에 조류가 다소 높을 수 있습니다. "
+            "카약·보트 등은 가능하지만, 물과의 직접 접촉은 줄이고 샤워 등 위생 관리를 신경 써 주세요."
+        )
+
+    return title, color, msg
+
 
 # ============================================================
-# 배경 이미지 (static 폴더)
+# 배경 이미지 + 상태 아이콘
 # ============================================================
 STATIC_DIR = Path(__file__).parent / "static"
 img_good = STATIC_DIR / "bg_good.jpg"
@@ -87,25 +126,102 @@ img_warning = STATIC_DIR / "bg_warning.jpg"
 img_danger = STATIC_DIR / "bg_danger.jpg"
 img_unknown = STATIC_DIR / "bg_unknown.jpg"
 
+icon_good = STATIC_DIR / "icon_good.png"
+icon_warning = STATIC_DIR / "icon_warning.png"
+icon_danger = STATIC_DIR / "icon_danger.png"
+icon_unknown = STATIC_DIR / "icon_unknown.png"
+
 
 def get_base64_image(path: Path):
     if not path.exists():
         return None
     mime_type, _ = mimetypes.guess_type(str(path))
-    mime_type = mime_type or "image/jpeg"
+    mime_type = mime_type or "image/png"
     with open(path, "rb") as f:
         b64 = base64.b64encode(f.read()).decode("utf-8")
     return f"data:{mime_type};base64,{b64}"
 
 
-cur_chl_for_bg = get_last_valid(df, "Chlorophyll_Kalman")
-status_label_bg, status_emoji_bg, status_color_bg, status_msg_bg = classify_chl(cur_chl_for_bg)
+# ============================================================
+# 기본 정보 계산 + 지표 조회 날짜 결정
+# ============================================================
+if "Timestamp" in df.columns and not df.empty:
+    df = df.sort_values("Timestamp")
+    latest_row = df.iloc[-1]
+    latest_time = latest_row["Timestamp"]
+    today_date = latest_time.date()
+else:
+    latest_row = df.iloc[-1] if not df.empty else None
+    latest_time = (
+        latest_row["Timestamp"]
+        if latest_row is not None and "Timestamp" in latest_row.index
+        else None
+    )
+    today_date = df["date"].iloc[-1] if "date" in df.columns and not df.empty else None
 
-if status_label_bg == "좋음":
+# 지표 조회 날짜 기본값/선택값
+if not df.empty and "date" in df.columns:
+    available_dates = sorted(df["date"].unique())
+    default_date = today_date or available_dates[-1]
+
+    if "metric_date" in st.session_state:
+        sd = st.session_state["metric_date"]
+        if isinstance(sd, pd.Timestamp):
+            sd = sd.date()
+        elif isinstance(sd, datetime.datetime):
+            sd = sd.date()
+        if sd < available_dates[0] or sd > available_dates[-1]:
+            sd = default_date
+        selected_date = sd
+    else:
+        selected_date = default_date
+else:
+    available_dates = None
+    selected_date = today_date
+
+# 선택 날짜 기준 데이터프레임
+if not df.empty and "date" in df.columns and selected_date is not None:
+    sel_df = df[df["date"] == selected_date]
+else:
+    sel_df = df.copy()
+
+# 선택 날짜 기준 현재값
+sel_chl = get_last_valid(sel_df, "Chlorophyll_Kalman")
+sel_temp = get_last_valid(sel_df, "Temperature_Kalman")
+sel_turb = get_last_valid(sel_df, "Turbidity_Kalman")
+sel_do = get_last_valid(sel_df, "Dissolved Oxygen_Kalman")
+
+# 선택 날짜 기준 마지막 시각
+if not sel_df.empty and "Timestamp" in sel_df.columns:
+    sel_time = sel_df["Timestamp"].iloc[-1]
+else:
+    sel_time = latest_time
+
+# 선택 날짜 기준 범위 텍스트
+if (
+    "Chlorophyll_Kalman" in sel_df.columns
+    and not sel_df["Chlorophyll_Kalman"].dropna().empty
+):
+    sel_min = sel_df["Chlorophyll_Kalman"].min()
+    sel_max = sel_df["Chlorophyll_Kalman"].max()
+    if today_date is not None and selected_date == today_date:
+        hero_range_text = f"오늘 범위: {sel_min:.1f} ~ {sel_max:.1f} µg/L"
+    else:
+        hero_range_text = (
+            f"{selected_date.strftime('%m/%d')} 범위: {sel_min:.1f} ~ {sel_max:.1f} µg/L"
+        )
+else:
+    hero_range_text = "범위: 데이터 없음"
+
+# 선택 날짜 기준 등급 → 배경/아이콘에 사용
+hero_label, hero_emoji, hero_color, _ = classify_chl(sel_chl)
+
+# 배경 이미지
+if hero_label == "좋음":
     chosen_img = img_good
-elif status_label_bg == "주의":
+elif hero_label == "주의":
     chosen_img = img_warning
-elif status_label_bg == "위험":
+elif hero_label == "위험":
     chosen_img = img_danger
 else:
     chosen_img = img_unknown
@@ -113,10 +229,22 @@ else:
 bg_data_uri = get_base64_image(chosen_img)
 bg_css_url = bg_data_uri if bg_data_uri else None
 
+# TODAY 카드용 상태 아이콘
+if hero_label == "좋음":
+    hero_icon_path = icon_good
+elif hero_label == "주의":
+    hero_icon_path = icon_warning
+elif hero_label == "위험":
+    hero_icon_path = icon_danger
+else:
+    hero_icon_path = icon_unknown
+
+hero_icon_uri = get_base64_image(hero_icon_path) if hero_icon_path is not None else None
+
 # ============================================================
 # CSS 스타일
 # ============================================================
-css_block = "<style>\n"
+css_block = "<style>"
 
 if bg_css_url:
     css_block += f"""
@@ -137,15 +265,12 @@ else:
 """
 
 css_block += """
-/* 기본 padding: 모바일 기준 */
 .block-container {
-    padding-top: 3.5rem;
+    padding-top: 2.8rem;
     padding-bottom: 2rem;
-    padding-left: 1.2rem;
-    padding-right: 1.2rem;
+    padding-left: 1.4rem;
+    padding-right: 1.4rem;
 }
-
-/* 큰 화면에서만 좌우 여유 */
 @media (min-width: 1200px) {
   .block-container {
       padding-left: 5rem;
@@ -153,252 +278,265 @@ css_block += """
   }
 }
 
+/* 공통 카드 */
+.card {
+    background-color: rgba(15, 23, 42, 0.75);
+    border-radius: 1.4rem;
+    padding: 1.2rem 1.4rem;
+    box-shadow: 0 18px 40px rgba(0,0,0,0.45);
+    backdrop-filter: blur(18px);
+}
+
+/* Plotly 차트 카드 스타일 */
+div[data-testid="stPlotlyChart"] {
+    background-color: rgba(15, 23, 42, 0.75);
+    border-radius: 1.4rem;
+    padding: 0.8rem 1.0rem 1.0rem 1.0rem;
+    box-shadow: 0 18px 40px rgba(0,0,0,0.45);
+    backdrop-filter: blur(18px);
+}
+
+/* 메인 타이틀 */
 .main-title {
-    font-size: clamp(22px, 2.3vw, 30px);
+    font-size: clamp(24px, 2.6vw, 32px);
     font-weight: 800;
-    margin-bottom: 0.25rem;
     color: #f9fafb;
+    margin-bottom: 0.15rem;
 }
 .sub-title {
-    font-size: 14px;
-    opacity: 0.8;
-    margin-bottom: 1rem;
+    font-size: 13px;
+    opacity: 0.85;
+    margin-bottom: 0.7rem;
 }
 .tag-pill {
     display: inline-block;
-    padding: 0.15rem 0.55rem;
+    padding: 0.12rem 0.55rem;
     border-radius: 999px;
     font-size: 0.7rem;
     margin-right: 0.25rem;
-    background-color: rgba(15, 23, 42, 0.8);
+    background-color: rgba(15, 23, 42, 0.75);
     color: #e5e7eb;
     border: 1px solid rgba(148, 163, 184, 0.4);
 }
 
-/* 메인 카드 */
+/* TODAY 카드 */
 .hero-card {
-    padding: 1.2rem 1.4rem;
-    border-radius: 1.3rem;
-    background: radial-gradient(circle at top, rgba(29,39,82,0.75), rgba(2,6,23,0.6));
-    color: #e5e7eb;
-    box-shadow: 0 20px 40px rgba(0,0,0,0.35);
-
-    display: grid;
-    grid-template-columns: 1fr;
-    row-gap: 1.2rem;
-
-    min-height: 260px;
-    height: auto;
-}
-
-/* 데스크톱에서 좌/우 2열 */
-@media (min-width: 900px) {
-  .hero-card {
-      grid-template-columns: 2fr 1.1fr;
-      column-gap: 2rem;
-  }
-}
-
-.hero-left {
+    text-align: center;
     display: flex;
     flex-direction: column;
-    justify-content: center;
+    align-items: center;
+    padding: 1.8rem 1.4rem 1.6rem 1.4rem;
 }
-
 .hero-title {
-    font-size: 0.85rem;
-    letter-spacing: 0.08em;
+    font-size: 0.78rem;
+    letter-spacing: 0.12em;
     text-transform: uppercase;
-    opacity: 0.7;
+    opacity: 0.8;
 }
 .hero-location {
     font-size: 1.1rem;
-    margin-top: 0.2rem;
+    margin-top: 0.25rem;
     font-weight: 600;
 }
-
 .hero-main-row {
     display: flex;
     align-items: flex-end;
-    flex-wrap: wrap;
     gap: 0.2rem;
-    margin-top: 0.5rem;
+    margin-top: 0.55rem;
 }
 .hero-main-value {
-    font-size: clamp(2.4rem, 6vw, 3.5rem);
+    font-size: clamp(3.0rem, 7vw, 3.8rem);
     font-weight: 800;
     line-height: 1.05;
 }
 .hero-main-unit {
     font-size: 1.1rem;
-    opacity: 0.8;
-    margin-bottom: 0.3rem;
+    opacity: 0.85;
+    margin-bottom: 0.35rem;
 }
-
-.hero-label {
-    font-size: 0.85rem;
-    opacity: 0.75;
+.hero-condition {
+    font-size: 1.05rem;
+    margin-top: 0.25rem;
+}
+.hero-range {
+    font-size: 0.78rem;
     margin-top: 0.4rem;
-    margin-bottom: 0.05rem;
+    opacity: 0.9;
 }
-.hero-subtext {
-    font-size: 0.78rem;
-    opacity: 0.8;
-    margin-top: 0rem;
-}
-.hero-subtext-note {
+.hero-grade-guide {
     font-size: 0.75rem;
-    opacity: 0.6;
-    margin-top: 0.2rem;
+    opacity: 0.85;
+    margin-top: 0.45rem;
 }
 
-.hero-status-box {
-    display: flex;
-    align-items: center;
-    justify-content: center;
+/* 상태 아이콘 */
+.hero-icon {
+    width: 72px;
+    margin-top: 0.6rem;
+    margin-bottom: 0.25rem;
 }
 
-.hero-badge {
-    width: 100%;
-    max-width: 420px;
-    height: 100%;
-    max-height: 180px;
-
-    padding: 0 1.6rem;
-    border-radius: 999px;
-    background-color: rgba(15, 23, 42, 0.9);
-    border: 2px solid rgba(148, 163, 184, 0.5);
-    box-sizing: border-box;
-
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 0.6rem;
-}
-.hero-badge span:first-child {
-    font-size: 1.4rem;
-}
-.hero-badge-label {
-    font-size: clamp(2.2rem, 5vw, 4rem);
-    font-weight: 700;
-}
-
-/* 모바일에서 배지 최소 높이 확보 */
-@media (max-width: 899px) {
-  .hero-status-box {
-      min-height: 140px;
-  }
-}
-
-/* chip 카드 */
+/* 현재 주요 지표 카드 */
 .chip-box {
-    padding: 0.75rem 0.9rem;
-    border-radius: 1rem;
-    background-color: rgba(15, 23, 42, 0.85);
-    border: 1px solid rgba(148, 163, 184, 0.35);
+    border-radius: 1.0rem;
+    padding: 0.7rem 0.9rem;
+    background-color: rgba(15, 23, 42, 0.75);
+    border: 1px solid rgba(148, 163, 184, 0.4);
     font-size: 0.78rem;
-    margin-bottom: 0.4rem;
+    margin-bottom: 0.45rem;
+    text-align: center;
 }
 .chip-label {
     opacity: 0.7;
     font-size: 0.76rem;
 }
 .chip-value {
-    font-size: 1.05rem;
+    font-size: 1.02rem;
     font-weight: 600;
     margin-top: 0.2rem;
 }
-
 .small-title {
     font-size: 0.9rem;
     font-weight: 600;
-    margin-bottom: 0.25rem;
-    margin-top: 0.8rem;
+    margin-bottom: 0.2rem;
+    margin-top: 0.4rem;
 }
+
+/* 오늘의 추천 활동 카드 */
+.recommend-card {
+    margin-top: 0.45rem;
+    border-radius: 1.0rem;
+    padding: 0.85rem 0.95rem;
+    background-color: rgba(15, 23, 42, 0.75);
+    border: 1px solid rgba(148, 163, 184, 0.5);
+    font-size: 0.8rem;
+}
+.recommend-title {
+    font-size: 0.86rem;
+    font-weight: 600;
+    margin-bottom: 0.25rem;
+}
+.recommend-body {
+    font-size: 0.78rem;
+    line-height: 1.5;
+}
+
+/* 섹션 타이틀 (📅 이번주 조류량 예측 등) */
 .section-title {
-    font-size: 1.1rem;
-    font-weight: 700;
+    font-size: 1.3rem;
+    font-weight: 600;
     margin-top: 1.4rem;
-    margin-bottom: 0.5rem;
+    margin-bottom: 0.35rem;
 }
 .info-text {
-    font-size: 0.85rem;
+    font-size: 0.8rem;
+    opacity: 0.82;
+}
+
+/* 주간 예보 카드 */
+.week-card-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 0.45rem;
+    font-size: 0.86rem;
+}
+.week-subtitle {
+    font-size: 0.76rem;
     opacity: 0.85;
 }
-
-/* 예보 그래프 카드 – 반투명 박스 */
-.forecast-card {
-    background-color: rgba(15, 23, 42, 0.9);
-    border-radius: 1rem;
-    padding: 0.8rem 1.0rem 0.6rem;
-    box-shadow: 0 16px 32px rgba(15,23,42,0.6);
-    margin-top: 0.4rem;
+.week-rows {
+    margin-top: 0.25rem;
 }
-
-/* 오른쪽 요약 카드 */
-.side-card {
-    background-color: rgba(15, 23, 42, 0.88);
-    border-radius: 1rem;
-    padding: 0.8rem 1.0rem 0.9rem;
-    box-shadow: 0 16px 32px rgba(0,0,0,0.55);
-    margin-top: 0.4rem;
-}
-
-/* 활동 권장 안내 카드 */
-.activity-card {
-    margin-top: 0.8rem;
-    padding: 0.7rem 0.9rem;
-    border-radius: 1rem;
-    background-color: rgba(15, 23, 42, 0.85);
-    box-shadow: 0 10px 20px rgba(0,0,0,0.45);
-    border: 1px solid rgba(148,163,184,0.45);
-}
-.activity-title {
-    font-size: 0.9rem;
-    font-weight: 600;
+.week-header-row {
+    display: grid;
+    grid-template-columns: 1.5fr 1.6fr 0.9fr 4.0fr 0.9fr;
+    column-gap: 0.45rem;
+    font-size: 0.76rem;
+    opacity: 0.9;
+    padding-bottom: 0.15rem;
+    border-bottom: 1px solid rgba(148,163,184,0.35);
     margin-bottom: 0.15rem;
+    text-align: center;
 }
-.activity-text {
-    font-size: 0.8rem;
+.week-row {
+    display: grid;
+    grid-template-columns: 1.5fr 1.6fr 0.9fr 4.0fr 0.9fr;
+    align-items: center;
+    column-gap: 0.45rem;
+    padding: 0.25rem 0;
+    font-size: 0.82rem;
+    text-align: center;
+}
+.week-day {
+    font-weight: 500;
+}
+.week-status {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.25rem;
+}
+.week-emoji {
+    font-size: 1.0rem;
+}
+.week-status-text {
+    font-size: 0.78rem;
     opacity: 0.9;
 }
-
-/* 등급 기준 안내 카드 */
-.grade-card {
-    margin-top: 0.8rem;
-    padding: 0.7rem 0.9rem;
-    border-radius: 1rem;
-    background-color: rgba(15, 23, 42, 0.92);
-    border: 1px solid rgba(148,163,184,0.5);
-    font-size: 0.8rem;
+.week-min,
+.week-max {
+    font-variant-numeric: tabular-nums;
+    opacity: 0.9;
 }
-.grade-pill {
-    display: inline-flex;
-    align-items: center;
-    padding: 0.1rem 0.55rem;
+.week-range-track {
+    position: relative;
+    height: 0.42rem;
     border-radius: 999px;
-    margin-right: 0.4rem;
-    margin-top: 0.2rem;
-    font-size: 0.76rem;
-    font-weight: 600;
+    background-color: rgba(148, 163, 184, 0.3);
+    overflow: hidden;
+}
+.week-range-bar {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    border-radius: 999px;
 }
 
-/* Metric 텍스트 색 통일 */
-div[data-testid="stMetricLabel"] {
-    color: #f9fafb !important;
-}
-div[data-testid="stMetricValue"] {
-    color: #f9fafb !important;
-}
-div[data-testid="stMetricDelta"] {
-    color: #f97316 !important;
+/* 평균값 빨간 굵은 바 */
+.week-mean-marker {
+    position: absolute;
+    top: -0.14rem;        /* 위/아래 위치 (조금 더 튀어나오게) */
+    width: 4px;           /* 두께 */
+    height: 0.70rem;      /* 세로 길이 */
+    background-color: #ef4444;  /* 🔴 빨간색 */
+    border-radius: 999px;
 }
 
-/* 작은 화면에서 섹션 간격 */
-@media (max-width: 600px) {
-  .section-title {
-      margin-top: 1rem;
-  }
+/* 지표 조회 날짜 위젯 스타일 */
+div[data-testid="stDateInput"] label {
+    color: #f9fafb !important;
+    font-size: 0.78rem;
+    margin-bottom: 0.1rem;
+}
+div[data-testid="stDateInput"] > div {
+    background-color: rgba(15, 23, 42, 0.75) !important;
+    border-radius: 0.75rem;
+    border: 1px solid rgba(148, 163, 184, 0.5);
+}
+div[data-testid="stDateInput"] input {
+    color: #000000 !important;
+    background-color: #f9fafb !important;
+    caret-color: #000000 !important;
+}
+div[data-testid="stDateInput"] svg {
+    color: #f9fafb !important;
+}
+
+/* 데이터 테이블 섹션 */
+.expander-text {
+    font-size: 0.8rem;
+    opacity: 0.85;
 }
 </style>
 """
@@ -406,66 +544,19 @@ div[data-testid="stMetricDelta"] {
 st.markdown(css_block, unsafe_allow_html=True)
 
 # ============================================================
-# 기본 정보 계산
-# ============================================================
-if "Timestamp" in df.columns and not df.empty:
-    df = df.sort_values("Timestamp")
-    latest_row = df.iloc[-1]
-    latest_time = latest_row["Timestamp"]
-    today_date = latest_time.date()
-    last_24h_df = df[df["Timestamp"] >= latest_time - pd.Timedelta(hours=24)].copy()
-else:
-    latest_row = df.iloc[-1] if not df.empty else None
-    latest_time = latest_row["Timestamp"] if (latest_row is not None and "Timestamp" in latest_row.index) else None
-    today_date = df["date"].iloc[-1] if ("date" in df.columns and not df.empty) else None
-    last_24h_df = df.copy() if not df.empty else df
-
-cur_chl = get_last_valid(df, "Chlorophyll_Kalman")
-cur_temp = get_last_valid(df, "Temperature_Kalman")
-cur_do = get_last_valid(df, "Dissolved Oxygen_Kalman")
-cur_turb = get_last_valid(df, "Turbidity_Kalman")
-
-level_label, level_emoji, level_color, level_msg = classify_chl(cur_chl)
-
-# 오늘 최소·최대 조류
-if "date" in df.columns and today_date is not None:
-    today_df = df[df["date"] == today_date]
-else:
-    today_df = last_24h_df
-
-if not today_df.empty and "Chlorophyll_Kalman" in today_df.columns and not today_df["Chlorophyll_Kalman"].dropna().empty:
-    today_min = today_df["Chlorophyll_Kalman"].min()
-    today_max = today_df["Chlorophyll_Kalman"].max()
-else:
-    today_min = np.nan
-    today_max = np.nan
-
-# 전체 예측 기준 최대값
-max_future_value = None
-max_future_time = None
-if forecast_df is not None and not forecast_df.empty:
-    idxmax = forecast_df["Forecast_Chlorophyll_Kalman"].idxmax()
-    max_future_value = forecast_df.loc[idxmax, "Forecast_Chlorophyll_Kalman"]
-    max_future_time = forecast_df.loc[idxmax, "Timestamp"]
-
-# ============================================================
 # 헤더
 # ============================================================
+st.markdown('<div class="main-title">브리즈번 수질 알리미</div>', unsafe_allow_html=True)
 st.markdown(
-    '<div class="main-title">브리즈번 수질 알리미</div>',
-    unsafe_allow_html=True,
-)
-st.markdown(
-    '<div class="sub-title">브리즈번 강 수질을 날씨앱처럼 쉽게 확인하세요.</div>',
+    '<div class="sub-title">브리즈번 강(Colmslie Buoy) 수질을 날씨앱처럼 한눈에 확인하세요.</div>',
     unsafe_allow_html=True,
 )
 st.markdown(
     """
-<span class="tag-pill">센서 데이터</span>
-<span class="tag-pill">실시간 모니터링</span>
-<span class="tag-pill">클로로필 농도</span>
+<span class="tag-pill">실시간 센서</span>
+<span class="tag-pill">조류(클로로필) 모니터링</span>
 <span class="tag-pill">7일 예보</span>
-<span class="tag-pill">수질 정보 안내</span>
+<span class="tag-pill">시민용 안내</span>
 """,
     unsafe_allow_html=True,
 )
@@ -476,337 +567,380 @@ st.write("")
 # ============================================================
 col_hero_main, col_hero_side = st.columns([2, 1.4])
 
-with col_hero_main:
-    chl_text = "–" if pd.isna(cur_chl) else f"{cur_chl:.1f}"
+# 오른쪽: 날짜 선택 + 지표 + 추천 활동
+with col_hero_side:
+    st.markdown('<div class="small-title">현재 주요 지표</div>', unsafe_allow_html=True)
 
-    hero_html = f"""<div class="hero-card">
-<div class="hero-left">
+    if not df.empty and "date" in df.columns and available_dates is not None:
+        st.date_input(
+            "지표 조회 날짜",
+            value=selected_date,
+            min_value=available_dates[0],
+            max_value=available_dates[-1],
+            key="metric_date",
+        )
+    else:
+        st.write("데이터가 부족하여 날짜 선택이 어렵습니다.")
+
+    c1, c2 = st.columns(2)
+    with c1:
+        temp_text = "–" if pd.isna(sel_temp) else f"{sel_temp:.1f} °C"
+        st.markdown(
+            f"""
+<div class="chip-box">
+  <div class="chip-label">수온</div>
+  <div class="chip-value">{temp_text}</div>
+</div>
+""",
+            unsafe_allow_html=True,
+        )
+    with c2:
+        turb_text = "–" if pd.isna(sel_turb) else f"{sel_turb:.1f} NTU"
+        st.markdown(
+            f"""
+<div class="chip-box">
+  <div class="chip-label">탁도</div>
+  <div class="chip-value">{turb_text}</div>
+</div>
+""",
+            unsafe_allow_html=True,
+        )
+
+    c3, c4 = st.columns(2)
+    with c3:
+        do_text = "–" if pd.isna(sel_do) else f"{sel_do:.1f} mg/L"
+        st.markdown(
+            f"""
+<div class="chip-box">
+  <div class="chip-label">용존산소</div>
+  <div class="chip-value">{do_text}</div>
+</div>
+""",
+            unsafe_allow_html=True,
+        )
+    with c4:
+        if sel_time is not None:
+            time_txt = sel_time.strftime("%Y-%m-%d %H:%M")
+        else:
+            time_txt = "정보 없음"
+        st.markdown(
+            f"""
+<div class="chip-box">
+  <div class="chip-label">마지막 업데이트</div>
+  <div class="chip-value">{time_txt}</div>
+</div>
+""",
+            unsafe_allow_html=True,
+        )
+
+    chl_label_for_rec, _, _, _ = classify_chl(sel_chl)
+    rec_title, rec_color, rec_msg = build_activity_recommendation(
+        sel_chl, sel_temp, sel_turb, chl_label_for_rec
+    )
+
+    st.markdown(
+        f"""
+<div class="recommend-card">
+  <div class="recommend-title">
+    <span style="color:{rec_color}; font-size:0.9rem;">●</span>
+    오늘의 추천 활동
+  </div>
+  <div class="recommend-body">
+    <b>{rec_title}</b><br/>
+    {rec_msg}
+  </div>
+</div>
+""",
+        unsafe_allow_html=True,
+    )
+
+# 왼쪽: TODAY 카드
+with col_hero_main:
+    chl_text = "–" if pd.isna(sel_chl) else f"{sel_chl:.1f}"
+    icon_html = (
+        f'<img class="hero-icon" src="{hero_icon_uri}" />'
+        if hero_icon_uri is not None
+        else ""
+    )
+
+    hero_html = f"""
+<div class="card hero-card">
   <div class="hero-title">TODAY • BRISBANE RIVER • COLMSLIE</div>
-  <div class="hero-location">현재 조류량</div>
+  <div class="hero-location">브리즈번 강 조류 농도</div>
+
+  {icon_html}
 
   <div class="hero-main-row">
     <span class="hero-main-value">{chl_text}</span>
     <span class="hero-main-unit">µg/L</span>
   </div>
 
-  <div class="hero-label">조류 농도 (클로로필 기준)</div>
-  <div class="hero-subtext">{level_msg}</div>
-  <div class="hero-subtext hero-subtext-note">
-    ※ 호주 환경기준 참고(0–4 µg/L 양호, 4–8 주의, 8 이상 위험)
+  <div class="hero-condition" style="color:{hero_color};">
+    {hero_emoji} {hero_label}
   </div>
-</div>
 
-<div class="hero-status-box">
-  <div class="hero-badge" style="border-color:{level_color};">
-    <span>{level_emoji}</span>
-    <span class="hero-badge-label" style="color:{level_color};">{level_label}</span>
+  <div class="hero-range">{hero_range_text}</div>
+
+  <div class="hero-grade-guide">
+    🟢 0–4 : 양호&nbsp;&nbsp;&nbsp; 🟡 4–8 : 주의&nbsp;&nbsp;&nbsp; 🔴 8 이상 : 위험
   </div>
 </div>
-</div>"""
+"""
     st.markdown(hero_html, unsafe_allow_html=True)
 
-with col_hero_side:
-    st.markdown('<div class="small-title">오늘 조류 농도 범위</div>', unsafe_allow_html=True)
-    range_text = (
-        f"{today_min:.1f} ~ {today_max:.1f} µg/L"
-        if not pd.isna(today_min)
-        else "데이터 없음"
-    )
-    st.markdown(
-        f"""<div class="chip-box">
-<div class="chip-label">오늘 최소 · 최대 (보정값 기준)</div>
-<div class="chip-value">{range_text}</div>
-</div>""",
-        unsafe_allow_html=True,
-    )
-
-    st.markdown('<div class="small-title">현재 주요 지표</div>', unsafe_allow_html=True)
-    c1, c2 = st.columns(2)
-    with c1:
-        temp_text = "–" if pd.isna(cur_temp) else f"{cur_temp:.1f} °C"
-        st.markdown(
-            f"""<div class="chip-box">
-<div class="chip-label">수온</div>
-<div class="chip-value">{temp_text}</div>
-</div>""",
-            unsafe_allow_html=True,
-        )
-    with c2:
-        turb_text = "–" if pd.isna(cur_turb) else f"{cur_turb:.1f} NTU"
-        st.markdown(
-            f"""<div class="chip-box">
-<div class="chip-label">탁도</div>
-<div class="chip-value">{turb_text}</div>
-</div>""",
-            unsafe_allow_html=True,
-        )
-
-    c3, c4 = st.columns(2)
-    with c3:
-        do_text = "–" if pd.isna(cur_do) else f"{cur_do:.1f} mg/L"
-        st.markdown(
-            f"""<div class="chip-box">
-<div class="chip-label">용존산소</div>
-<div class="chip-value">{do_text}</div>
-</div>""",
-            unsafe_allow_html=True,
-        )
-    with c4:
-        if latest_time is not None:
-            time_txt = latest_time.strftime("%Y-%m-%d %H:%M")
-        else:
-            time_txt = "정보 없음"
-        st.markdown(
-            f"""<div class="chip-box">
-<div class="chip-label">마지막 업데이트 시각</div>
-<div class="chip-value">{time_txt}</div>
-</div>""",
-            unsafe_allow_html=True,
-        )
-
-# ---------------- 활동 권장 안내 카드 ----------------
-if level_label == "좋음":
-    activity_msg = "👟 강변 산책·조깅, 자전거 등 일상적인 야외 활동에 무리가 없는 수준입니다."
-elif level_label == "주의":
-    activity_msg = "🚣 조류 농도가 다소 높습니다. 물놀이·카약 등 수상 레저 전 현장 안내판과 공식 공지를 꼭 확인해 주세요."
-elif level_label == "위험":
-    activity_msg = "⛔ 수질이 좋지 않습니다. 수영·물놀이·애완동물 물놀이를 가급적 피하고, 수상 레저는 지자체 안내를 먼저 확인해 주세요."
-else:
-    activity_msg = "⚪ 데이터가 부족해 세부 활동 권장은 어렵습니다. 현장 안내와 공공 정보를 함께 참고해 주세요."
-
-st.markdown(
-    f"""
-<div class="activity-card">
-  <div class="activity-title">활동 권장 안내</div>
-  <div class="activity-text">{activity_msg}</div>
-</div>
-""",
-    unsafe_allow_html=True,
-)
-
-# ---------------- 등급 기준 안내 카드 ----------------
-st.markdown(
-    '<div class="grade-card">'
-    '<div style="font-weight:600; margin-bottom:0.2rem; font-size:0.9rem;">등급 기준 안내</div>'
-    '<div style="margin-bottom:0.2rem; font-size:0.78rem;">클로로필 농도(µg/L)를 기준으로 수질 등급을 안내합니다.</div>'
-    '<div>'
-    '<span class="grade-pill" style="background-color:rgba(34,197,94,0.18); color:#4ade80;">🟢 0–4 : 양호</span>'
-    '<span class="grade-pill" style="background-color:rgba(234,179,8,0.18); color:#facc15;">🟡 4–8 : 주의</span>'
-    '<span class="grade-pill" style="background-color:rgba(248,113,113,0.18); color:#f97373;">🔴 8 이상 : 위험</span>'
-    '</div>'
-    '</div>',
-    unsafe_allow_html=True,
-)
-
 # ============================================================
-# 2. 이번주 조류량 예측 + 특정 날짜 예측값 요약
+# 2. 이번주 조류량 예측 + 위치 지도
 # ============================================================
 st.markdown(
-    '<div class="section-title">📆 이번주 조류량 예측</div>',
+    '<div class="section-title">📅 이번주 조류량 예측</div>',
     unsafe_allow_html=True,
 )
 st.markdown(
-    '<div class="info-text">센서 데이터를 학습한 예측 모델을 이용해, 약 10분 간격으로 예측한 조류 농도(µg/L)를 시간 흐름에 따라 보여줍니다.</div>',
+    '<div class="info-text">예측 모델을 이용해 앞으로 7일 동안의 일별 조류 농도 범위(최저·최고)와 전체 추세를 함께 보여줍니다.</div>',
     unsafe_allow_html=True,
 )
 
 if forecast_df is None or forecast_df.empty:
-    st.info("예측 파일(future_week_forecast.csv)을 찾을 수 없어, 7일 예보를 표시할 수 없습니다.")
+    st.info("예측 파일(future_week_forecast.csv)을 찾을 수 없어, 주간 예보를 표시할 수 없습니다.")
 else:
-    forecast_df = forecast_df.copy()
-    forecast_df["date"] = forecast_df["Timestamp"].dt.date
+    df_fore = forecast_df.copy()
+    df_fore["date"] = df_fore["Timestamp"].dt.date
 
-    base = forecast_df[["Timestamp", "Forecast_Chlorophyll_Kalman", "date"]].dropna().copy()
-    base = base.sort_values("Timestamp").reset_index(drop=True)
+    daily = (
+        df_fore.groupby("date")["Forecast_Chlorophyll_Kalman"]
+        .agg(["min", "max", "mean"])
+        .reset_index()
+    )
+    daily = daily.sort_values("date").head(7)
 
-    if base.empty:
-        st.warning("예측 데이터에 유효한 값이 없습니다.")
+    if daily.empty:
+        st.warning("주간 예보 데이터가 없습니다.")
     else:
-        vals_all = base["Forecast_Chlorophyll_Kalman"]
-        overall_mean = vals_all.mean()
-        overall_max = vals_all.max()
-        overall_high_points = (vals_all >= 8).sum()
+        global_min = daily["min"].min()
+        global_max = daily["max"].max()
+        denom = (
+            global_max - global_min
+            if pd.notna(global_min) and pd.notna(global_max) and global_max > global_min
+            else None
+        )
 
-        unique_dates = sorted(base["date"].unique())
+        weekdays_kr = ["월", "화", "수", "목", "금", "토", "일"]
 
-        col_forecast, col_day = st.columns([4, 1])
+        period_start = daily["date"].min()
+        period_end = daily["date"].max()
+        period_text = f"{period_start.strftime('%m월 %d일')} ~ {period_end.strftime('%m월 %d일')}"
 
-        # ---------- 오른쪽: 예보 요약 + 특정 날짜 요약 ----------
-        with col_day:
-            st.markdown('<div class="side-card">', unsafe_allow_html=True)
+        # ----- 라인 그래프 조회 바 -----
+        st.markdown(
+            '<div class="info-text" style="margin-top:0.4rem; margin-bottom:0.15rem;">라인 그래프 조회 일자</div>',
+            unsafe_allow_html=True,
+        )
+        line_date_options = [None] + list(daily["date"])
 
-            # (1) 예보 요약 3박스 (한 행)
-            st.markdown('<div class="small-title">예보 요약</div>', unsafe_allow_html=True)
-            yy1, yy2, yy3 = st.columns(3)
-            with yy1:
-                st.markdown(
-                    f"""<div class="chip-box">
-<div class="chip-label">평균</div>
-<div class="chip-value">{overall_mean:.1f}</div>
-</div>""",
-                    unsafe_allow_html=True,
-                )
-            with yy2:
-                st.markdown(
-                    f"""<div class="chip-box">
-<div class="chip-label">최대</div>
-<div class="chip-value">{overall_max:.1f}</div>
-</div>""",
-                    unsafe_allow_html=True,
-                )
-            with yy3:
-                st.markdown(
-                    f"""<div class="chip-box">
-<div class="chip-label">위험(≥8)</div>
-<div class="chip-value">{int(overall_high_points)}시점</div>
-</div>""",
-                    unsafe_allow_html=True,
-                )
+        selected_line_date = st.selectbox(
+            "",
+            options=line_date_options,
+            index=0,
+            format_func=lambda d: "전체 기간" if d is None else d.strftime("%m/%d"),
+            label_visibility="collapsed",
+        )
 
-            # (2) 특정 날짜 예측값 요약 (그래프와는 독립)
-            st.markdown('<div class="small-title">특정 날짜 예측값 요약</div>', unsafe_allow_html=True)
+        if selected_line_date is None:
+            # 전체 기간
+            mask = (df_fore["date"] >= period_start) & (df_fore["date"] <= period_end)
+        else:
+            # 선택한 하루만
+            mask = df_fore["date"] == selected_line_date
 
-            selected_date = st.selectbox(
-                "날짜 선택",
-                options=unique_dates,
-                format_func=lambda d: d.strftime("%Y-%m-%d") if hasattr(d, "strftime") else str(d),
-            )
+        line_df = df_fore.loc[mask].copy()
+        line_df = line_df.sort_values("Timestamp")
 
-            day_data = base[base["date"] == selected_date]
+        # 시간별 예측 라인 그래프
+        if not line_df.empty:
+            y_max = max(line_df["Forecast_Chlorophyll_Kalman"].max(), 10)
 
-            if day_data.empty:
-                st.markdown(
-                    """<div class="chip-box">
-<div class="chip-label">선택한 날짜의 예측 데이터가 없습니다.</div>
-</div>""",
-                    unsafe_allow_html=True,
-                )
-            else:
-                vals_day = day_data["Forecast_Chlorophyll_Kalman"].dropna()
-                mean_val = vals_day.mean()
-                min_val = vals_day.min()
-                max_val = vals_day.max()
-                day_level_label, day_level_emoji, day_level_color, _ = classify_chl(max_val)
-
-                st.markdown(
-                    f"""<div class="chip-box">
-<div class="chip-label">{selected_date.strftime("%Y-%m-%d")} 예측 요약</div>
-<div class="chip-value">평균 {mean_val:.1f} · 최소 {min_val:.1f} · 최대 {max_val:.1f} µg/L</div>
-<div style="margin-top:0.3rem; font-size:0.8rem;">
-  {day_level_emoji} <span style="color:{day_level_color}; font-weight:600;">{day_level_label}</span> 수준에 해당하는 시점이 포함될 수 있습니다.
-</div>
-</div>""",
-                    unsafe_allow_html=True,
-                )
-
-            st.markdown("</div>", unsafe_allow_html=True)
-
-        # ---------- 왼쪽: 주간 애니메이션 그래프 ----------
-        with col_forecast:
-            FRAME_STEP = 3
-            ANIM_SPEED_MS = 1  # 이미 많이 빠른 속도
-
-            frames = []
-            n = len(base)
-            for frame_idx, i in enumerate(range(0, n, FRAME_STEP)):
-                tmp = base.iloc[: i + 1].copy()
-                tmp["frame"] = frame_idx
-                frames.append(tmp)
-
-            anim_df = pd.concat(frames, ignore_index=True)
-
-            chl_max_fore = base["Forecast_Chlorophyll_Kalman"].max()
-            y_max = chl_max_fore if chl_max_fore >= 10 else 10
-
-            fig_fore = px.line(
-                anim_df,
+            fig = px.line(
+                line_df,
                 x="Timestamp",
                 y="Forecast_Chlorophyll_Kalman",
-                animation_frame="frame",
-                range_x=[base["Timestamp"].min(), base["Timestamp"].max()],
-                range_y=[0, y_max],
                 labels={
                     "Timestamp": "시간",
                     "Forecast_Chlorophyll_Kalman": "예상 클로로필 (µg/L)",
-                    "frame": "예측 진행",
                 },
             )
+            add_risk_bands_plotly(fig, y_max)
 
-            add_risk_bands_plotly(fig_fore, y_max)
+            fig.update_traces(line=dict(width=2.0))
 
-            fig_fore.update_layout(
-                legend_title_text="",
-                height=360,
-                margin=dict(l=10, r=10, t=40, b=10),
+            fig.update_layout(
+                height=260,
+                margin=dict(l=10, r=10, t=35, b=10),
                 showlegend=False,
-                paper_bgcolor="#020617",
-                plot_bgcolor="#020617",
-                font=dict(color="#e5e7eb"),
+                paper_bgcolor="rgba(0,0,0,0)",
+                plot_bgcolor="rgba(0,0,0,0)",
+                font=dict(color="#ffffff"),
                 xaxis=dict(
                     tickformat="%m-%d %H:%M",
-                    ticklabelmode="period",
                     gridcolor="rgba(148,163,184,0.25)",
-                    zerolinecolor="rgba(148,163,184,0.3)",
+                    zerolinecolor="rgba(148,163,184,0.35)",
+                    title_font=dict(color="#ffffff", size=12),
+                    tickfont=dict(color="#ffffff", size=11),
                 ),
                 yaxis=dict(
+                    range=[0, y_max],
                     gridcolor="rgba(148,163,184,0.25)",
-                    zerolinecolor="rgba(148,163,184,0.3)",
+                    zerolinecolor="rgba(148,163,184,0.35)",
+                    title="클로로필 (µg/L)",
+                    title_font=dict(color="#ffffff", size=12),
+                    tickfont=dict(color="#ffffff", size=11),
+                ),
+                title=dict(
+                    text="이번주 시간별 조류 농도 추세",
+                    x=0.01,
+                    xanchor="left",
+                    y=0.95,
+                    font=dict(size=14, color="#ffffff"),
                 ),
             )
 
-            if fig_fore.layout.updatemenus and len(fig_fore.layout.updatemenus) > 0:
-                um = fig_fore.layout.updatemenus[0]
-                um.x = 0
-                um.xanchor = "left"
-                um.y = 1.05
-                um.yanchor = "bottom"
-                um.pad = dict(l=0, r=0, t=0, b=0)
-                for btn in um.buttons:
-                    if "args" in btn and len(btn["args"]) > 1:
-                        args1 = btn["args"][1]
-                        if "frame" in args1:
-                            args1["frame"]["duration"] = ANIM_SPEED_MS
-                        if "transition" in args1:
-                            args1["transition"]["duration"] = int(ANIM_SPEED_MS / 2)
+            st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.info("선택한 기간에 대한 예측 데이터가 없습니다.")
 
-            step_timestamps = base["Timestamp"].iloc[::FRAME_STEP].reset_index(drop=True)
-            frame_labels = {i: ts.strftime("%m-%d %H:%M") for i, ts in enumerate(step_timestamps)}
+        # 7일간 일별 예보 카드 HTML
+        week_rows_html = ""
+        for _, row in daily.iterrows():
+            d = row["date"]
 
-            if fig_fore.layout.sliders and len(fig_fore.layout.sliders) > 0:
-                slider = fig_fore.layout.sliders[0]
-                slider.x = 0
-                slider.xanchor = "left"
-                slider.len = 1.0
-                slider.pad = dict(l=0, r=0, t=50, b=0)
-                for i, step in enumerate(slider["steps"]):
-                    step["label"] = frame_labels.get(i, step["label"])
+            if today_date is not None and d == today_date:
+                day_label = f"오늘 ({d.strftime('%m/%d')})"
+            else:
+                wd = d.weekday()
+                day_label = f"{weekdays_kr[wd]} ({d.strftime('%m/%d')})"
 
-            st.markdown('<div class="forecast-card">', unsafe_allow_html=True)
-            st.plotly_chart(fig_fore, use_container_width=True)
-            st.markdown("</div>", unsafe_allow_html=True)
+            d_min = row["min"]
+            d_max = row["max"]
+            d_mean = row["mean"]
 
-        # 최악 시간대 안내
-        if max_future_time is not None and not pd.isna(max_future_value):
+            # 상태에 따른 색상/아이콘
+            label, emoji, color, _ = classify_chl(d_mean)
+
+            # 범위 바 위치 계산
+            if denom is None or denom <= 0:
+                left_pct = 0
+                width_pct = 100
+            else:
+                left_pct = (float(d_min) - float(global_min)) / float(denom) * 100
+                width_pct = (float(d_max) - float(d_min)) / float(denom) * 100
+                left_pct = max(0, min(left_pct, 100))
+                width_pct = max(5, min(width_pct, 100 - left_pct))
+
+            # 평균값 마커 위치 계산
+            if denom is None or denom <= 0:
+                mean_marker_left = 50.0
+            else:
+                mean_marker_left = (float(d_mean) - float(global_min)) / float(denom) * 100
+                mean_marker_left = max(0, min(mean_marker_left, 100))
+
+            week_rows_html += f"""
+  <div class="week-row">
+    <div class="week-day">{day_label}</div>
+    <div class="week-status">
+      <span class="week-emoji">{emoji}</span>
+      <span class="week-status-text">{label}</span>
+    </div>
+    <div class="week-min">{d_min:.1f}</div>
+    <div class="week-range-track">
+      <div class="week-range-bar"
+           style="left:{left_pct:.1f}%; width:{width_pct:.1f}%; background-color:{color};"></div>
+      <div class="week-mean-marker"
+           style="left:{mean_marker_left:.1f}%;"
+           title="평균 {d_mean:.1f} µg/L"></div>
+    </div>
+    <div class="week-max">{d_max:.1f}</div>
+  </div>
+"""
+
+        week_card_html = f"""
+<div class="card">
+  <div class="week-card-header">
+    <div>7일간 일별 예보 (µg/L)</div>
+    <div class="week-subtitle">예보 기간: {period_text}</div>
+  </div>
+  <div class="week-rows">
+    <div class="week-header-row">
+      <div>요일</div>
+      <div>상태</div>
+      <div>최소</div>
+      <div>예상 범위</div>
+      <div>최대</div>
+    </div>
+    {week_rows_html}
+  </div>
+</div>
+"""
+
+        # 브리즈번 강 위치 지도 카드 (3:2 중 2 부분) + 로드뷰 버튼
+        map_card_html = """
+<div class="card">
+  <div class="week-card-header">
+    <div>브리즈번 강 위치</div>
+    <div class="week-subtitle">Colmslie Buoy 기준</div>
+  </div>
+  <div style="position:relative; border-radius: 1.0rem; overflow: hidden; margin-top: 0.25rem;">
+    <iframe
+        src="https://www.openstreetmap.org/export/embed.html?bbox=153.08047%2C-27.45170%2C153.08647%2C-27.44520&layer=mapnik&marker=-27.44920%2C153.08347"
+        style="border:0; width:100%; height:220px;"
+        loading="lazy"
+        referrerpolicy="no-referrer-when-downgrade">
+    </iframe>
+    <a
+        href="https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=-27.449204719754594,153.0834701552862&heading=0&pitch=0&fov=80"
+        target="_blank"
+        style="position:absolute; right:0.75rem; bottom:0.75rem; background:rgba(15,23,42,0.85); color:#f9fafb; font-size:0.78rem; padding:0.25rem 0.6rem; border-radius:999px; text-decoration:none;">
+        로드뷰 열기
+    </a>
+  </div>
+</div>
+"""
+
+        # 3:2 비율로 카드 배치
+        col_week_card, col_map_card = st.columns([3, 2])
+        with col_week_card:
+            st.markdown(week_card_html, unsafe_allow_html=True)
+        with col_map_card:
+            st.markdown(map_card_html, unsafe_allow_html=True)
+
+        # 주간 최대 예보 정보
+        max_future_value = None
+        max_future_time = None
+        if forecast_df is not None and not forecast_df.empty:
+            idxmax = forecast_df["Forecast_Chlorophyll_Kalman"].idxmax()
+            max_future_value = forecast_df.loc[idxmax, "Forecast_Chlorophyll_Kalman"]
+            max_future_time = forecast_df.loc[idxmax, "Timestamp"]
+
+        if max_future_time is not None and max_future_value is not None:
             lab, emo, _, _ = classify_chl(max_future_value)
             t_txt = max_future_time.strftime("%Y-%m-%d %H:%M")
             st.markdown(
                 f"""
-<div class="info-text" style="margin-top:0.4rem;">
-  🔎 <b>예보상 가장 조류 농도가 높게 예상되는 시점</b>은 <b>{t_txt}</b>이며,  
-  예측값은 약 <b>{max_future_value:.1f} µg/L</b> ({emo} {lab}) 입니다.
+<div class="info-text" style="margin-top:0.45rem;">
+  가장 조류 농도가 높게 예보된 시점은 <b>{t_txt}</b>이며, 예측값은 약 <b>{max_future_value:.1f} µg/L</b> ({emo} {lab}) 입니다.
 </div>
 """,
                 unsafe_allow_html=True,
             )
 
 # ============================================================
-# 3. 데이터 자세히 보기
+# 3. 전체 데이터 보기
 # ============================================================
-with st.expander("📊 전체 수집 데이터 보기 (관심자/전문가용)", expanded=False):
+with st.expander("📊 전체 수집 데이터 보기", expanded=False):
     st.markdown(
         """
-- 아래 표는 센서 보정값(Kalman)이 포함된 원시 데이터 일부입니다.  
-- 엑셀로 내려받아 추가 분석도 가능합니다.
+<div class="expander-text">
+- 아래 표는 센서 보정값(Kalman)이 포함된 원시 데이터 일부입니다.<br>
+- CSV로 내려받아 추가 분석에 활용할 수 있습니다.
+</div>
 """,
         unsafe_allow_html=True,
     )
@@ -828,16 +962,3 @@ with st.expander("📊 전체 수집 데이터 보기 (관심자/전문가용)",
             file_name="brisbane_water_all.csv",
             mime="text/csv",
         )
-
-# ============================================================
-# 4. 데이터 출처 안내
-# ============================================================
-st.markdown(
-    """
-<div class="info-text" style="margin-top:1.0rem; font-size:0.75rem; opacity:0.75;">
-  데이터 출처: 브리즈번 강 Colmslie Buoy 센서 · 약 10분 간격 자동 업데이트<br/>
-  예보값은 통계 모델 기반 추정치로, 실제 현장 상황 및 공식 발표와 차이가 있을 수 있습니다.
-</div>
-""",
-    unsafe_allow_html=True,
-)
